@@ -127,11 +127,7 @@ the metrics that drove the decision. API base defaults to the deployed Modal URL
   Nothing in this repository contains one.
 - `*.parquet` and `*.npz` are gitignored — ~175 MB, all regenerable above. `keep_drop.csv` and
   `ablation.csv` are committed, since they are what the dashboard and the writeup read.
-- **Tier 3 has only run on 350 of 5,407 episodes**, so the outlier test examined 318 and found
-  nothing at α=0.01. The other 5,089 are marked keep because nothing rejected them, not because
-  anything cleared them. The dashboard states this rather than hiding it. Running
-  `curate.py::embed` across the whole slice is what closes it.
 - Two known rough edges in `score.py`: axis baselines are computed over the whole population
-  including already-rejected episodes, and trim spans come from the right hand alone.
+  including already-rejected episodes, and trim spans come from the right-hand side alone.
 - Long-form design notes are kept outside this repo. They predate the removal of per-operator
   quotas and describe a model that no longer exists — this README is the current account.
