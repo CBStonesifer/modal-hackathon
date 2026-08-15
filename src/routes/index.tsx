@@ -44,7 +44,7 @@ function Index() {
           <Tabs defaultValue="overview" className="space-y-6">
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
-              <TabsTrigger value="clips">Rejected clips</TabsTrigger>
+              <TabsTrigger value="clips">Clips</TabsTrigger>
             </TabsList>
             <TabsContent value="overview">
               <Overview episodes={data} />

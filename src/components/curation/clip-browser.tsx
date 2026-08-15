@@ -14,11 +14,12 @@ import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import {
   clipUrl,
   countByReason,
@@ -30,6 +31,8 @@ import {
 
 const PAGE_SIZE = 48;
 const ALL = "all";
+const APPROVED = "approved";
+const REJECTED = "rejected";
 
 function formatMetric(value: number | null) {
   return value === null || value === undefined ? "—" : value.toFixed(4);
@@ -102,23 +105,29 @@ function ClipDialog({ episode, onClose }: { episode: Episode | null; onClose: ()
 }
 
 export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
-  const [reason, setReason] = useState(ALL);
+  const [status, setStatus] = useState(ALL);
   const [operator, setOperator] = useState(ALL);
-  const [includeKeeps, setIncludeKeeps] = useState(false);
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [selected, setSelected] = useState<Episode | null>(null);
 
   const reasonOptions = useMemo(() => countByReason(episodes), [episodes]);
   const operatorOptions = useMemo(() => operators(episodes), [episodes]);
+  const approvedCount = useMemo(
+    () => episodes.filter((e) => e.decision === "keep").length,
+    [episodes],
+  );
 
   const filtered = useMemo(() => {
-    return episodes.filter((episode) => {
-      if (!includeKeeps && episode.decision !== "drop") return false;
-      if (reason !== ALL && episode.reason !== reason) return false;
-      if (operator !== ALL && episode.operator !== operator) return false;
-      return true;
-    });
-  }, [episodes, includeKeeps, reason, operator]);
+    return episodes
+      .filter((episode) => {
+        if (operator !== ALL && episode.operator !== operator) return false;
+        if (status === ALL) return true;
+        if (status === APPROVED) return episode.decision === "keep";
+        if (status === REJECTED) return episode.decision === "drop";
+        return episode.reason === status;
+      })
+      .sort((a, b) => b.score - a.score);
+  }, [episodes, status, operator]);
 
   const resetPaging = () => setVisible(PAGE_SIZE);
 
@@ -126,24 +135,31 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
     <div className="space-y-6">
       <div className="flex flex-wrap items-end gap-4">
         <div className="space-y-1.5">
-          <Label htmlFor="reason">Reason</Label>
+          <Label htmlFor="status">Status</Label>
           <Select
-            value={reason}
+            value={status}
             onValueChange={(value) => {
-              setReason(value);
+              setStatus(value);
               resetPaging();
             }}
           >
-            <SelectTrigger id="reason" className="w-64">
+            <SelectTrigger id="status" className="w-72">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL}>All reasons</SelectItem>
-              {reasonOptions.map((option) => (
-                <SelectItem key={option.reason} value={option.reason}>
-                  {option.label} ({option.count})
-                </SelectItem>
-              ))}
+              <SelectItem value={ALL}>All clips ({episodes.length.toLocaleString()})</SelectItem>
+              <SelectItem value={APPROVED}>Approved ({approvedCount.toLocaleString()})</SelectItem>
+              <SelectItem value={REJECTED}>
+                Rejected ({(episodes.length - approvedCount).toLocaleString()})
+              </SelectItem>
+              <SelectGroup>
+                <SelectLabel>Rejected for</SelectLabel>
+                {reasonOptions.map((option) => (
+                  <SelectItem key={option.reason} value={option.reason}>
+                    {option.label} ({option.count})
+                  </SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
         </div>
@@ -169,18 +185,6 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
               ))}
             </SelectContent>
           </Select>
-        </div>
-
-        <div className="flex items-center gap-2 pb-2">
-          <Switch
-            id="keeps"
-            checked={includeKeeps}
-            onCheckedChange={(checked) => {
-              setIncludeKeeps(checked);
-              resetPaging();
-            }}
-          />
-          <Label htmlFor="keeps">Include kept episodes</Label>
         </div>
 
         <p className="pb-2 text-sm text-muted-foreground">
