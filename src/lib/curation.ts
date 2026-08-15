@@ -8,22 +8,25 @@ export type Episode = {
   operator: string;
   decision: "keep" | "drop";
   score: number;
-  reason: string;
+  reason: string | null;
+  flags: string | null;
   trim_start: number | null;
   trim_end: number | null;
   n_frames: number;
   act_span: number | null;
   progress_dip: number | null;
-  low_detail_frac: number | null;
-  right_sparc: number | null;
-  right_jerk_rms: number | null;
+  ax_poor_image: number | null;
+  ax_jittery: number | null;
+  ax_unsteady_camera: number | null;
+  ax_hesitant: number | null;
+  ax_incomplete: number | null;
   task: string | null;
   scene: string | null;
   num_frames: number | null;
   has_clip: boolean;
 };
 
-// Only these four are claims about the data. `below_operator_quota` is a budget decision.
+// Data-integrity failures. Each is independently verifiable against the episode.
 export const INTEGRITY_REASONS = [
   "frame_count_mismatch",
   "no_visible_change",
@@ -31,12 +34,36 @@ export const INTEGRITY_REASONS = [
   "too_short",
 ] as const;
 
+// Quality axes. A ranked drop is named by the axis it fails worst; a reason can name two.
+export const QUALITY_AXES = [
+  "poor_image",
+  "jittery",
+  "unsteady_camera",
+  "hesitant",
+  "incomplete",
+] as const;
+
+export const BELOW_AVERAGE = "below_average";
+
+export const AXIS_FIELD: Record<string, keyof Episode> = {
+  poor_image: "ax_poor_image",
+  jittery: "ax_jittery",
+  unsteady_camera: "ax_unsteady_camera",
+  hesitant: "ax_hesitant",
+  incomplete: "ax_incomplete",
+};
+
 export const REASON_LABELS: Record<string, string> = {
   frame_count_mismatch: "Frame count mismatch",
   no_visible_change: "No visible change",
   mostly_dead_time: "Mostly dead time",
   too_short: "Too short",
-  below_operator_quota: "Below operator quota",
+  poor_image: "Poor image",
+  jittery: "Jittery",
+  unsteady_camera: "Unsteady camera",
+  hesitant: "Hesitant",
+  incomplete: "Incomplete",
+  below_average: "Below average",
 };
 
 export const REASON_EXPLANATIONS: Record<string, string> = {
@@ -46,9 +73,29 @@ export const REASON_EXPLANATIONS: Record<string, string> = {
     "Frame-to-final-frame similarity never dips (< 0.02). Nothing measurably happened in the scene.",
   mostly_dead_time: "Less than 35% of the episode contains hand motion.",
   too_short: "Fewer than 60 frames.",
-  below_operator_quota:
-    "No defect found — this episode scored below the keep quota for its own operator at the chosen keep rate.",
+  poor_image:
+    "Faint or low-detail frames, or unstable frame size — low_detail_frac, faint_frac, size_cv.",
+  jittery: "Rough hand and head motion — SPARC on all three tracks.",
+  unsteady_camera: "Head moves roughly or sits idle — head_jerk_rms, head_idle_frac.",
+  hesitant: "The hands spend a lot of the episode not moving — left and right idle_frac.",
+  incomplete:
+    "Activity does not span the episode, or the reach is indirect — act_span, straightness.",
+  below_average:
+    "No axis crossed its flag threshold. This episode ranked below its operator's quota without an identifiable defect — a budget decision, not a claim about the data.",
 };
+
+/** Reasons combine as "hesitant+jittery", so an axis filter matches either half. */
+export function reasonMatches(reason: string | null, selection: string): boolean {
+  if (!reason) return false;
+  if ((QUALITY_AXES as readonly string[]).includes(selection)) {
+    return reason.split("+").includes(selection);
+  }
+  return reason === selection;
+}
+
+export function parseFlags(flags: string | null): string[] {
+  return flags ? flags.split("+").filter(Boolean) : [];
+}
 
 export async function fetchEpisodes(): Promise<Episode[]> {
   const response = await fetch(`${CLIPS_API}/manifest.json`);
@@ -62,27 +109,40 @@ export function summarise(episodes: Episode[]) {
   const kept = episodes.filter((e) => e.decision === "keep").length;
   const dropped = episodes.length - kept;
   const integrity = episodes.filter((e) =>
-    (INTEGRITY_REASONS as readonly string[]).includes(e.reason),
+    (INTEGRITY_REASONS as readonly string[]).includes(e.reason ?? ""),
+  ).length;
+  const belowAverage = episodes.filter((e) => e.reason === BELOW_AVERAGE).length;
+  const flaggedKeeps = episodes.filter(
+    (e) => e.decision === "keep" && parseFlags(e.flags).length > 0,
   ).length;
   return {
     total: episodes.length,
     kept,
     dropped,
     integrity,
-    quota: dropped - integrity,
+    belowAverage,
+    quality: dropped - integrity - belowAverage,
+    flaggedKeeps,
     keepRate: episodes.length ? kept / episodes.length : 0,
   };
 }
 
-export function countByReason(episodes: Episode[]) {
-  const counts = new Map<string, number>();
-  for (const episode of episodes) {
-    if (episode.decision !== "drop") continue;
-    counts.set(episode.reason, (counts.get(episode.reason) ?? 0) + 1);
-  }
-  return [...counts.entries()]
-    .map(([reason, count]) => ({ reason, label: REASON_LABELS[reason] ?? reason, count }))
-    .sort((a, b) => b.count - a.count);
+export function countIntegrity(episodes: Episode[]) {
+  return INTEGRITY_REASONS.map((reason) => ({
+    reason: reason as string,
+    label: REASON_LABELS[reason],
+    count: episodes.filter((e) => e.reason === reason).length,
+  })).sort((a, b) => b.count - a.count);
+}
+
+/** Counted by containment, so an episode named "hesitant+jittery" lands in both axes. */
+export function countAxes(episodes: Episode[]) {
+  const drops = episodes.filter((e) => e.decision === "drop");
+  return QUALITY_AXES.map((axis) => ({
+    reason: axis as string,
+    label: REASON_LABELS[axis],
+    count: drops.filter((e) => reasonMatches(e.reason, axis)).length,
+  })).sort((a, b) => b.count - a.count);
 }
 
 export function keepRateByOperator(episodes: Episode[]) {

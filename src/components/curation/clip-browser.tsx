@@ -20,8 +20,14 @@ import {
 } from "@/components/ui/select";
 import {
   clipUrl,
-  countByReason,
+  countAxes,
+  countIntegrity,
   operators,
+  parseFlags,
+  reasonMatches,
+  AXIS_FIELD,
+  BELOW_AVERAGE,
+  QUALITY_AXES,
   REASON_EXPLANATIONS,
   REASON_LABELS,
   type Episode,
@@ -31,14 +37,53 @@ const PAGE_SIZE = 60;
 const ALL = "all";
 const APPROVED = "approved";
 const REJECTED = "rejected";
+const AXIS_FLAG = 1.0; // z above this counts as failing the axis, matching score.py
 
 function formatMetric(value: number | null) {
   return value === null || value === undefined ? "—" : value.toFixed(4);
 }
 
+function shortReason(reason: string | null) {
+  if (!reason) return "";
+  const primary = reason.split("+")[0];
+  return REASON_LABELS[primary] ?? primary;
+}
+
+function AxisBar({ axis, value }: { axis: string; value: number | null }) {
+  const failed = value !== null && value > AXIS_FLAG;
+  // axes are z-scores within operator, roughly -4..4; centre the bar on 0
+  const offset = value === null ? 0 : Math.max(-4, Math.min(4, value));
+  return (
+    <div className="grid grid-cols-[9rem_1fr_3.5rem] items-center gap-3 px-6 py-2">
+      <span
+        className={`font-mono text-[11px] uppercase tracking-wider ${
+          failed ? "text-chart-3" : "text-muted-foreground"
+        }`}
+      >
+        {axis}
+      </span>
+      <span className="relative block h-px w-full bg-border">
+        <span className="absolute left-1/2 top-[-3px] h-[7px] w-px bg-border" />
+        <span
+          className={`absolute top-[-1px] h-[3px] ${failed ? "bg-chart-3" : "bg-primary"}`}
+          style={{
+            left: offset >= 0 ? "50%" : `${50 + (offset / 4) * 50}%`,
+            width: `${(Math.abs(offset) / 4) * 50}%`,
+          }}
+        />
+      </span>
+      <span className="text-right font-mono text-[11px] tabular-nums">
+        {value === null ? "—" : value.toFixed(2)}
+      </span>
+    </div>
+  );
+}
+
 function ClipDialog({ episode, onClose }: { episode: Episode | null; onClose: () => void }) {
   if (!episode) return null;
 
+  const dropped = episode.decision === "drop";
+  const flags = parseFlags(episode.flags);
   const metrics: [string, string][] = [
     ["score", episode.score.toFixed(4)],
     ["operator", episode.operator.slice(0, 12)],
@@ -46,8 +91,6 @@ function ClipDialog({ episode, onClose }: { episode: Episode | null; onClose: ()
     ["catalog_frames", episode.num_frames ? String(Math.round(episode.num_frames)) : "—"],
     ["act_span", formatMetric(episode.act_span)],
     ["progress_dip", formatMetric(episode.progress_dip)],
-    ["low_detail_frac", formatMetric(episode.low_detail_frac)],
-    ["right_sparc", formatMetric(episode.right_sparc)],
     [
       "trim_span",
       episode.trim_start !== null && episode.trim_end !== null
@@ -63,22 +106,22 @@ function ClipDialog({ episode, onClose }: { episode: Episode | null; onClose: ()
           <DialogTitle className="font-mono text-sm">{episode.episode_hash}</DialogTitle>
           <DialogDescription className="text-xs">
             <span
-              className={
-                episode.decision === "drop"
-                  ? "font-mono uppercase tracking-widest text-destructive"
-                  : "font-mono uppercase tracking-widest text-primary"
-              }
+              className={`font-mono uppercase tracking-widest ${
+                dropped ? "text-destructive" : "text-primary"
+              }`}
             >
-              {episode.decision === "drop" ? (episode.reason ?? "drop") : "keep"}
+              {dropped ? (episode.reason ?? "drop") : "keep"}
             </span>{" "}
             —{" "}
-            {episode.decision === "drop"
-              ? (REASON_EXPLANATIONS[episode.reason] ?? "")
-              : "no defect found, and it scored above its operator's quota."}
+            {dropped
+              ? (REASON_EXPLANATIONS[episode.reason?.split("+")[0] ?? ""] ?? "")
+              : flags.length
+                ? `kept, but flagged: ${flags.join(", ")}.`
+                : "no defect found, and it scored above its operator's quota."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid md:grid-cols-[1.5fr_1fr] md:divide-x md:divide-border">
+        <div className="grid md:grid-cols-[1.4fr_1fr] md:divide-x md:divide-border">
           <div className="p-4">
             {episode.has_clip ? (
               <video
@@ -97,16 +140,31 @@ function ClipDialog({ episode, onClose }: { episode: Episode | null; onClose: ()
             )}
           </div>
 
-          <dl className="divide-y divide-border">
-            {metrics.map(([label, value]) => (
-              <div key={label} className="flex items-baseline justify-between gap-4 px-6 py-2">
-                <dt className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
-                  {label}
-                </dt>
-                <dd className="font-mono text-xs tabular-nums">{value}</dd>
-              </div>
-            ))}
-          </dl>
+          <div>
+            <dl className="divide-y divide-border">
+              {metrics.map(([label, value]) => (
+                <div key={label} className="flex items-baseline justify-between gap-4 px-6 py-2">
+                  <dt className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                    {label}
+                  </dt>
+                  <dd className="font-mono text-xs tabular-nums">{value}</dd>
+                </div>
+              ))}
+            </dl>
+
+            <p className="border-y border-border px-6 py-2 font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+              failure axes · z within operator · &gt; {AXIS_FLAG.toFixed(1)} = flagged
+            </p>
+            <div className="divide-y divide-border">
+              {QUALITY_AXES.map((axis) => (
+                <AxisBar
+                  key={axis}
+                  axis={axis}
+                  value={episode[AXIS_FIELD[axis]] as number | null}
+                />
+              ))}
+            </div>
+          </div>
         </div>
       </DialogContent>
     </Dialog>
@@ -119,12 +177,17 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
   const [visible, setVisible] = useState(PAGE_SIZE);
   const [selected, setSelected] = useState<Episode | null>(null);
 
-  const reasonOptions = useMemo(() => countByReason(episodes), [episodes]);
+  const integrityOptions = useMemo(() => countIntegrity(episodes), [episodes]);
+  const axisOptions = useMemo(() => countAxes(episodes), [episodes]);
   const operatorOptions = useMemo(() => operators(episodes), [episodes]);
-  const approvedCount = useMemo(
-    () => episodes.filter((e) => e.decision === "keep").length,
-    [episodes],
-  );
+  const counts = useMemo(() => {
+    const kept = episodes.filter((e) => e.decision === "keep").length;
+    return {
+      kept,
+      dropped: episodes.length - kept,
+      belowAverage: episodes.filter((e) => e.reason === BELOW_AVERAGE).length,
+    };
+  }, [episodes]);
 
   const filtered = useMemo(() => {
     return episodes
@@ -133,7 +196,7 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
         if (status === ALL) return true;
         if (status === APPROVED) return episode.decision === "keep";
         if (status === REJECTED) return episode.decision === "drop";
-        return episode.reason === status;
+        return reasonMatches(episode.reason, status);
       })
       .sort((a, b) => b.score - a.score);
   }, [episodes, status, operator]);
@@ -164,19 +227,28 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
             </SelectTrigger>
             <SelectContent className="rounded-none font-mono text-xs">
               <SelectItem value={ALL}>All clips ({episodes.length.toLocaleString()})</SelectItem>
-              <SelectItem value={APPROVED}>Approved ({approvedCount.toLocaleString()})</SelectItem>
-              <SelectItem value={REJECTED}>
-                Rejected ({(episodes.length - approvedCount).toLocaleString()})
-              </SelectItem>
+              <SelectItem value={APPROVED}>Approved ({counts.kept.toLocaleString()})</SelectItem>
+              <SelectItem value={REJECTED}>Rejected ({counts.dropped.toLocaleString()})</SelectItem>
               <SelectGroup>
                 <SelectLabel className="text-[11px] uppercase tracking-[0.2em]">
-                  Rejected for
+                  Integrity defect
                 </SelectLabel>
-                {reasonOptions.map((option) => (
+                {integrityOptions.map((option) => (
                   <SelectItem key={option.reason} value={option.reason}>
                     {option.label} ({option.count})
                   </SelectItem>
                 ))}
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel className="text-[11px] uppercase tracking-[0.2em]">
+                  Quality axis
+                </SelectLabel>
+                {axisOptions.map((option) => (
+                  <SelectItem key={option.reason} value={option.reason}>
+                    {option.label} ({option.count})
+                  </SelectItem>
+                ))}
+                <SelectItem value={BELOW_AVERAGE}>Below average ({counts.belowAverage})</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -218,6 +290,7 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
       <div className="grid border-b border-border sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filtered.slice(0, visible).map((episode) => {
           const dropped = episode.decision === "drop";
+          const flags = parseFlags(episode.flags);
           return (
             <button
               key={episode.episode_hash}
@@ -231,10 +304,10 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
                 </span>
                 <span
                   className={`font-mono text-[10px] uppercase tracking-widest ${
-                    dropped ? "text-destructive" : "text-primary"
+                    dropped ? "text-destructive" : flags.length ? "text-chart-3" : "text-primary"
                   }`}
                 >
-                  {dropped ? (REASON_LABELS[episode.reason] ?? episode.reason) : "keep"}
+                  {dropped ? shortReason(episode.reason) : flags.length ? flags[0] : "keep"}
                 </span>
               </div>
               <div className="mt-2 flex items-baseline justify-between font-mono text-[11px] text-muted-foreground">
