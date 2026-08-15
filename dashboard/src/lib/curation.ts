@@ -1,5 +1,5 @@
 export const CLIPS_API =
-  import.meta.env.VITE_CLIPS_API ?? "https://cbstonesifer--egoverse-clips-api.modal.run";
+  import.meta.env["VITE_CLIPS_API"] ?? "https://cbstonesifer--egoverse-clips-api.modal.run";
 
 export const clipUrl = (episodeHash: string) => `${CLIPS_API}/clip/${episodeHash}.mp4`;
 
