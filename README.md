@@ -193,7 +193,6 @@ distributions are computed over the whole population, including episodes the int
 already rejected, and trim spans come from the right hand alone, so a left-lead demonstration can
 get its opening clipped.
 
-Longer design notes are in `video-curation/docs/` — `PIPELINE.md` for what was run and measured,
-`RESULTS.md` for what the numbers mean, `CONCEPTS.md` for the metric definitions. **These predate
-the quota removal and still describe per-operator quotas throughout**; the code and this README are
-current, the docs are not.
+Longer design notes (`PIPELINE.md`, `RESULTS.md`, `CONCEPTS.md`, `HANDOFF.md` and others) are kept
+outside this repository. They predate the quota removal and still describe per-operator quotas
+throughout, so this README is the current account of how the engine works.

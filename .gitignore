@@ -20,12 +20,16 @@ dist-ssr
 .wrangler/
 .dev.vars
 
-# Pipeline artifacts — regenerate with the commands in video-curation/README.md.
-# Together these are ~220 MB; only keep_drop.csv and ablation.csv are committed.
+# Pipeline artifacts — regenerate with the commands in the README.
+# Only keep_drop.csv and ablation.csv are committed.
 *.parquet
 *.npz
+*.zarr/
 __pycache__/
 video-curation/data/
+
+# Long-form design notes live outside the repo; the README is the current account.
+video-curation/docs/
 
 # Editor directories and files
 .vscode/*
