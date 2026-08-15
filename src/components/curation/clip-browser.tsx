@@ -1,8 +1,6 @@
 import { useMemo, useState } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -29,7 +27,7 @@ import {
   type Episode,
 } from "@/lib/curation";
 
-const PAGE_SIZE = 48;
+const PAGE_SIZE = 60;
 const ALL = "all";
 const APPROVED = "approved";
 const REJECTED = "rejected";
@@ -42,15 +40,16 @@ function ClipDialog({ episode, onClose }: { episode: Episode | null; onClose: ()
   if (!episode) return null;
 
   const metrics: [string, string][] = [
-    ["Score", episode.score.toFixed(4)],
-    ["Frames", String(episode.n_frames)],
-    ["Catalog frames", episode.num_frames ? String(Math.round(episode.num_frames)) : "—"],
-    ["Active span", formatMetric(episode.act_span)],
-    ["Progress dip", formatMetric(episode.progress_dip)],
-    ["Low detail fraction", formatMetric(episode.low_detail_frac)],
-    ["SPARC (right hand)", formatMetric(episode.right_sparc)],
+    ["score", episode.score.toFixed(4)],
+    ["operator", episode.operator.slice(0, 12)],
+    ["frames", String(episode.n_frames)],
+    ["catalog_frames", episode.num_frames ? String(Math.round(episode.num_frames)) : "—"],
+    ["act_span", formatMetric(episode.act_span)],
+    ["progress_dip", formatMetric(episode.progress_dip)],
+    ["low_detail_frac", formatMetric(episode.low_detail_frac)],
+    ["right_sparc", formatMetric(episode.right_sparc)],
     [
-      "Trim span",
+      "trim_span",
       episode.trim_start !== null && episode.trim_end !== null
         ? `${episode.trim_start} – ${episode.trim_end}`
         : "—",
@@ -59,42 +58,52 @@ function ClipDialog({ episode, onClose }: { episode: Episode | null; onClose: ()
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-3xl">
-        <DialogHeader>
-          <DialogTitle className="font-mono text-base">{episode.episode_hash}</DialogTitle>
-          <DialogDescription>
+      <DialogContent className="max-w-4xl gap-0 p-0">
+        <DialogHeader className="space-y-1 border-b border-border px-6 py-3 text-left">
+          <DialogTitle className="font-mono text-sm">{episode.episode_hash}</DialogTitle>
+          <DialogDescription className="text-xs">
+            <span
+              className={
+                episode.decision === "drop"
+                  ? "font-mono uppercase tracking-widest text-destructive"
+                  : "font-mono uppercase tracking-widest text-primary"
+              }
+            >
+              {episode.decision === "drop" ? (episode.reason ?? "drop") : "keep"}
+            </span>{" "}
+            —{" "}
             {episode.decision === "drop"
-              ? (REASON_EXPLANATIONS[episode.reason] ?? episode.reason)
-              : "Kept — no defect found and it scored above its operator's quota."}
+              ? (REASON_EXPLANATIONS[episode.reason] ?? "")
+              : "no defect found, and it scored above its operator's quota."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-6 md:grid-cols-[1.4fr_1fr]">
-          {episode.has_clip ? (
-            <video
-              key={episode.episode_hash}
-              className="w-full rounded-lg bg-muted"
-              src={clipUrl(episode.episode_hash)}
-              controls
-              autoPlay
-              loop
-              muted
-            />
-          ) : (
-            <div className="flex aspect-video items-center justify-center rounded-lg bg-muted text-sm text-muted-foreground">
-              No preview clip in the volume
-            </div>
-          )}
+        <div className="grid md:grid-cols-[1.5fr_1fr] md:divide-x md:divide-border">
+          <div className="p-4">
+            {episode.has_clip ? (
+              <video
+                key={episode.episode_hash}
+                className="w-full border border-border bg-black"
+                src={clipUrl(episode.episode_hash)}
+                controls
+                autoPlay
+                loop
+                muted
+              />
+            ) : (
+              <div className="flex aspect-video items-center justify-center border border-border font-mono text-xs text-muted-foreground">
+                no preview clip in volume
+              </div>
+            )}
+          </div>
 
-          <dl className="space-y-2 text-sm">
-            <div className="flex items-baseline justify-between gap-4">
-              <dt className="text-muted-foreground">Operator</dt>
-              <dd className="font-mono text-xs">{episode.operator.slice(0, 12)}</dd>
-            </div>
+          <dl className="divide-y divide-border">
             {metrics.map(([label, value]) => (
-              <div key={label} className="flex items-baseline justify-between gap-4">
-                <dt className="text-muted-foreground">{label}</dt>
-                <dd className="tabular-nums">{value}</dd>
+              <div key={label} className="flex items-baseline justify-between gap-4 px-6 py-2">
+                <dt className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+                  {label}
+                </dt>
+                <dd className="font-mono text-xs tabular-nums">{value}</dd>
               </div>
             ))}
           </dl>
@@ -130,12 +139,19 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
   }, [episodes, status, operator]);
 
   const resetPaging = () => setVisible(PAGE_SIZE);
+  const selectClass =
+    "w-full rounded-none border-border bg-transparent font-mono text-xs uppercase tracking-wider sm:w-72";
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end gap-4">
+    <div>
+      <div className="flex flex-wrap items-end gap-x-8 gap-y-4 border-b border-border px-6 py-4">
         <div className="space-y-1.5">
-          <Label htmlFor="status">Status</Label>
+          <Label
+            htmlFor="status"
+            className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground"
+          >
+            Status
+          </Label>
           <Select
             value={status}
             onValueChange={(value) => {
@@ -143,17 +159,19 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
               resetPaging();
             }}
           >
-            <SelectTrigger id="status" className="w-72">
+            <SelectTrigger id="status" className={selectClass}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-none font-mono text-xs">
               <SelectItem value={ALL}>All clips ({episodes.length.toLocaleString()})</SelectItem>
               <SelectItem value={APPROVED}>Approved ({approvedCount.toLocaleString()})</SelectItem>
               <SelectItem value={REJECTED}>
                 Rejected ({(episodes.length - approvedCount).toLocaleString()})
               </SelectItem>
               <SelectGroup>
-                <SelectLabel>Rejected for</SelectLabel>
+                <SelectLabel className="text-[11px] uppercase tracking-[0.2em]">
+                  Rejected for
+                </SelectLabel>
                 {reasonOptions.map((option) => (
                   <SelectItem key={option.reason} value={option.reason}>
                     {option.label} ({option.count})
@@ -165,7 +183,12 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
         </div>
 
         <div className="space-y-1.5">
-          <Label htmlFor="operator">Operator</Label>
+          <Label
+            htmlFor="operator"
+            className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground"
+          >
+            Operator
+          </Label>
           <Select
             value={operator}
             onValueChange={(value) => {
@@ -173,13 +196,13 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
               resetPaging();
             }}
           >
-            <SelectTrigger id="operator" className="w-56">
+            <SelectTrigger id="operator" className={`${selectClass} sm:w-56`}>
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="rounded-none font-mono text-xs">
               <SelectItem value={ALL}>All operators</SelectItem>
               {operatorOptions.map((value) => (
-                <SelectItem key={value} value={value} className="font-mono text-xs">
+                <SelectItem key={value} value={value}>
                   {value.slice(0, 12)}
                 </SelectItem>
               ))}
@@ -187,49 +210,56 @@ export function ClipBrowser({ episodes }: { episodes: Episode[] }) {
           </Select>
         </div>
 
-        <p className="pb-2 text-sm text-muted-foreground">
-          {filtered.length.toLocaleString()} episodes
+        <p className="pb-2 font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+          {filtered.length.toLocaleString()} of {episodes.length.toLocaleString()} episodes
         </p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {filtered.slice(0, visible).map((episode) => (
-          <Card
-            key={episode.episode_hash}
-            role="button"
-            tabIndex={0}
-            onClick={() => setSelected(episode)}
-            onKeyDown={(event) => event.key === "Enter" && setSelected(episode)}
-            className="cursor-pointer transition-colors hover:border-ring focus-visible:border-ring focus-visible:outline-none"
-          >
-            <CardContent className="space-y-2 p-4">
-              <div className="flex items-start justify-between gap-2">
-                <span className="font-mono text-xs text-muted-foreground">
+      <div className="grid border-b border-border sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {filtered.slice(0, visible).map((episode) => {
+          const dropped = episode.decision === "drop";
+          return (
+            <button
+              key={episode.episode_hash}
+              type="button"
+              onClick={() => setSelected(episode)}
+              className="group -mb-px -mr-px border-b border-r border-border px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+            >
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-mono text-xs text-muted-foreground group-hover:text-foreground">
                   {episode.episode_hash.slice(0, 12)}
                 </span>
-                <Badge variant={episode.decision === "drop" ? "destructive" : "secondary"}>
-                  {episode.decision === "drop"
-                    ? (REASON_LABELS[episode.reason] ?? episode.reason)
-                    : "keep"}
-                </Badge>
+                <span
+                  className={`font-mono text-[10px] uppercase tracking-widest ${
+                    dropped ? "text-destructive" : "text-primary"
+                  }`}
+                >
+                  {dropped ? (REASON_LABELS[episode.reason] ?? episode.reason) : "keep"}
+                </span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">score</span>
-                <span className="tabular-nums">{episode.score.toFixed(3)}</span>
+              <div className="mt-2 flex items-baseline justify-between font-mono text-[11px] text-muted-foreground">
+                <span>score {episode.score.toFixed(3)}</span>
+                <span>{episode.n_frames} frames</span>
               </div>
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">frames</span>
-                <span className="tabular-nums">{episode.n_frames}</span>
+              <div className="mt-2 h-px w-full bg-border">
+                <div
+                  className={dropped ? "h-px bg-destructive" : "h-px bg-primary"}
+                  style={{ width: `${Math.min(100, Math.max(2, (episode.score + 2) * 33))}%` }}
+                />
               </div>
-            </CardContent>
-          </Card>
-        ))}
+            </button>
+          );
+        })}
       </div>
 
       {visible < filtered.length ? (
-        <div className="flex justify-center">
-          <Button variant="outline" onClick={() => setVisible((count) => count + PAGE_SIZE)}>
-            Show more
+        <div className="flex justify-center border-b border-border py-6">
+          <Button
+            variant="outline"
+            onClick={() => setVisible((count) => count + PAGE_SIZE)}
+            className="rounded-none font-mono text-[11px] uppercase tracking-[0.2em]"
+          >
+            Load {Math.min(PAGE_SIZE, filtered.length - visible)} more
           </Button>
         </div>
       ) : null}

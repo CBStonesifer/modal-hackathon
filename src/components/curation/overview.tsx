@@ -1,6 +1,5 @@
 import { Bar, BarChart, CartesianGrid, ReferenceLine, XAxis, YAxis } from "recharts";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 import {
   countByReason,
@@ -14,17 +13,41 @@ import {
 
 const KEEP_TARGET = 70;
 
+const AXIS = {
+  tickLine: false,
+  axisLine: false,
+  tick: { fontSize: 10, fontFamily: "var(--font-mono, ui-monospace)" },
+} as const;
+
+function Panel({
+  title,
+  note,
+  className,
+  children,
+}: {
+  title: string;
+  note?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={className}>
+      <div className="flex items-baseline gap-3 border-b border-border px-6 py-2.5">
+        <h2 className="text-[11px] font-medium uppercase tracking-[0.2em]">{title}</h2>
+        {note ? <p className="text-xs text-muted-foreground">{note}</p> : null}
+      </div>
+      <div className="px-6 py-6">{children}</div>
+    </section>
+  );
+}
+
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <Card>
-      <CardHeader className="pb-2">
-        <CardDescription>{label}</CardDescription>
-        <CardTitle className="text-3xl tabular-nums">{value}</CardTitle>
-      </CardHeader>
-      {hint ? (
-        <CardContent className="pt-0 text-sm text-muted-foreground">{hint}</CardContent>
-      ) : null}
-    </Card>
+    <div className="px-6 py-5">
+      <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
+      <p className="mt-2 font-mono text-3xl tabular-nums">{value}</p>
+      <p className="mt-1 h-4 font-mono text-[11px] text-muted-foreground">{hint ?? ""}</p>
+    </div>
   );
 }
 
@@ -38,115 +61,96 @@ export function Overview({ episodes }: { episodes: Episode[] }) {
   const histogram = scoreHistogram(episodes);
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label="Episodes scored" value={stats.total.toLocaleString()} />
-        <Stat label="Kept" value={stats.kept.toLocaleString()} />
+    <div>
+      <div className="grid grid-cols-2 divide-x divide-border border-b border-border lg:grid-cols-4">
+        <Stat label="Episodes" value={stats.total.toLocaleString()} hint="scored" />
+        <Stat
+          label="Kept"
+          value={stats.kept.toLocaleString()}
+          hint={`${(stats.keepRate * 100).toFixed(1)}% of slice`}
+        />
         <Stat
           label="Dropped"
           value={stats.dropped.toLocaleString()}
-          hint={`${stats.integrity} for measurable defects, ${stats.quota.toLocaleString()} by quota`}
+          hint={`${stats.integrity} defect / ${stats.quota.toLocaleString()} quota`}
         />
-        <Stat label="Keep rate" value={`${(stats.keepRate * 100).toFixed(1)}%`} />
+        <Stat label="Target" value={`${KEEP_TARGET}%`} hint="keep rate, per operator" />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Integrity drops</CardTitle>
-            <CardDescription>
-              The {stats.integrity} episodes rejected for a defect in the data itself. Each rule is
-              independently verifiable against the episode.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer
-              config={{ count: { label: "Episodes", color: "var(--chart-1)" } }}
-              className="h-56 w-full"
-            >
-              <BarChart data={integrity} layout="vertical" margin={{ left: 8, right: 24 }}>
-                <CartesianGrid horizontal={false} />
-                <XAxis type="number" tickLine={false} axisLine={false} />
-                <YAxis
-                  type="category"
-                  dataKey="label"
-                  width={150}
-                  tickLine={false}
-                  axisLine={false}
-                />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <Bar dataKey="count" fill="var(--color-count)" radius={4} />
-              </BarChart>
-            </ChartContainer>
-            <dl className="mt-4 space-y-2 text-sm">
-              {integrity.map((entry) => (
-                <div key={entry.reason}>
-                  <dt className="font-medium">{entry.label}</dt>
-                  <dd className="text-muted-foreground">{REASON_EXPLANATIONS[entry.reason]}</dd>
-                </div>
-              ))}
-            </dl>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Keep rate by operator</CardTitle>
-            <CardDescription>
-              Scores are normalised within each operator and the quota is applied per operator, so
-              nobody is disproportionately deleted. The line is the {KEEP_TARGET}% target; the
-              spread below it is integrity drops.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <ChartContainer
-              config={{ keepRate: { label: "Keep rate %", color: "var(--chart-2)" } }}
-              className="h-72 w-full"
-            >
-              <BarChart data={operatorRates} margin={{ left: 0, right: 8 }}>
-                <CartesianGrid vertical={false} />
-                <XAxis dataKey="operator" tickLine={false} axisLine={false} hide />
-                <YAxis domain={[0, 100]} tickLine={false} axisLine={false} width={36} />
-                <ChartTooltip content={<ChartTooltipContent />} />
-                <ReferenceLine
-                  y={KEEP_TARGET}
-                  stroke="var(--muted-foreground)"
-                  strokeDasharray="4 4"
-                />
-                <Bar dataKey="keepRate" fill="var(--color-keepRate)" radius={4} />
-              </BarChart>
-            </ChartContainer>
-          </CardContent>
-        </Card>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Score distribution</CardTitle>
-          <CardDescription>
-            Kept and dropped episodes overlap because the cut is applied within each operator, not
-            against a global threshold.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <div className="grid border-b border-border lg:grid-cols-2 lg:divide-x lg:divide-border">
+        <Panel
+          title="Integrity drops"
+          note={`${stats.integrity} episodes rejected for a defect in the data itself`}
+        >
           <ChartContainer
-            config={{
-              keep: { label: "Keep", color: "var(--chart-2)" },
-              drop: { label: "Drop", color: "var(--chart-5)" },
-            }}
-            className="h-64 w-full"
+            config={{ count: { label: "Episodes", color: "var(--chart-5)" } }}
+            className="h-48 w-full"
           >
-            <BarChart data={histogram} margin={{ left: 0, right: 8 }}>
-              <CartesianGrid vertical={false} />
-              <XAxis dataKey="score" tickLine={false} axisLine={false} />
-              <YAxis tickLine={false} axisLine={false} width={40} />
+            <BarChart data={integrity} layout="vertical" margin={{ left: 8, right: 24 }}>
+              <CartesianGrid horizontal={false} stroke="var(--border)" />
+              <XAxis type="number" {...AXIS} />
+              <YAxis type="category" dataKey="label" width={150} {...AXIS} />
               <ChartTooltip content={<ChartTooltipContent />} />
-              <Bar dataKey="drop" stackId="a" fill="var(--color-drop)" />
-              <Bar dataKey="keep" stackId="a" fill="var(--color-keep)" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="count" fill="var(--color-count)" />
             </BarChart>
           </ChartContainer>
-        </CardContent>
-      </Card>
+
+          <dl className="mt-6 divide-y divide-border border-t border-border">
+            {integrity.map((entry) => (
+              <div key={entry.reason} className="grid gap-1 py-2.5 sm:grid-cols-[13rem_1fr]">
+                <dt className="font-mono text-[11px] uppercase tracking-wider">{entry.reason}</dt>
+                <dd className="text-xs text-muted-foreground">
+                  {REASON_EXPLANATIONS[entry.reason]}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Panel>
+
+        <Panel
+          title="Keep rate by operator"
+          note="normalised and quota'd within each operator, so nobody is disproportionately deleted"
+        >
+          <ChartContainer
+            config={{ keepRate: { label: "Keep rate %", color: "var(--chart-1)" } }}
+            className="h-64 w-full"
+          >
+            <BarChart data={operatorRates} margin={{ left: 0, right: 8 }}>
+              <CartesianGrid vertical={false} stroke="var(--border)" />
+              <XAxis dataKey="operator" hide />
+              <YAxis domain={[0, 100]} width={32} {...AXIS} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <ReferenceLine y={KEEP_TARGET} stroke="var(--chart-3)" strokeDasharray="3 3" />
+              <Bar dataKey="keepRate" fill="var(--color-keepRate)" />
+            </BarChart>
+          </ChartContainer>
+          <p className="mt-4 font-mono text-[11px] text-muted-foreground">
+            dashed line = {KEEP_TARGET}% target · spread below it is integrity drops
+          </p>
+        </Panel>
+      </div>
+
+      <Panel
+        title="Score distribution"
+        note="keep and drop overlap: the cut is applied within each operator, not against a global threshold"
+      >
+        <ChartContainer
+          config={{
+            keep: { label: "Keep", color: "var(--chart-1)" },
+            drop: { label: "Drop", color: "var(--chart-5)" },
+          }}
+          className="h-64 w-full"
+        >
+          <BarChart data={histogram} margin={{ left: 0, right: 8 }}>
+            <CartesianGrid vertical={false} stroke="var(--border)" />
+            <XAxis dataKey="score" {...AXIS} />
+            <YAxis width={40} {...AXIS} />
+            <ChartTooltip content={<ChartTooltipContent />} />
+            <Bar dataKey="drop" stackId="a" fill="var(--color-drop)" />
+            <Bar dataKey="keep" stackId="a" fill="var(--color-keep)" />
+          </BarChart>
+        </ChartContainer>
+      </Panel>
     </div>
   );
 }
