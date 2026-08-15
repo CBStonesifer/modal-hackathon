@@ -34,7 +34,7 @@ function Index() {
           </div>
           <span className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
             {stats
-              ? `${stats.total.toLocaleString()} episodes · ${(stats.keepRate * 100).toFixed(1)}% keep · ${stats.integrity} integrity drops`
+              ? `${stats.total.toLocaleString()} episodes · ${(stats.keepRate * 100).toFixed(1)}% keep · ${stats.integrity} integrity drops · ${stats.flagged.toLocaleString()} flagged`
               : "loading manifest"}
           </span>
         </div>

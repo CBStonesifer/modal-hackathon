@@ -15,6 +15,8 @@ export type Episode = {
   n_frames: number;
   act_span: number | null;
   progress_dip: number | null;
+  cluster: number | null;
+  outlier_p: number | null;
   ax_poor_image: number | null;
   ax_jittery: number | null;
   ax_unsteady_camera: number | null;
@@ -34,7 +36,8 @@ export const INTEGRITY_REASONS = [
   "too_short",
 ] as const;
 
-// Quality axes. A ranked drop is named by the axis it fails worst; a reason can name two.
+// Quality axes. An episode past the flag threshold on one carries a warning; an episode the
+// outlier test rejected is named by whichever of these it fails worst.
 export const QUALITY_AXES = [
   "poor_image",
   "jittery",
@@ -44,6 +47,7 @@ export const QUALITY_AXES = [
 ] as const;
 
 export const BELOW_AVERAGE = "below_average";
+export const AXIS_FLAG = 1.0; // z above this counts as failing the axis, matching score.py
 
 export const AXIS_FIELD: Record<string, keyof Episode> = {
   poor_image: "ax_poor_image",
@@ -68,23 +72,54 @@ export const REASON_LABELS: Record<string, string> = {
 
 export const REASON_EXPLANATIONS: Record<string, string> = {
   frame_count_mismatch:
-    "The frame count in the image shard disagrees with the catalog. One of them is lying, so the episode is untrustworthy.",
+    "The number of images in the storage shard disagrees with the number the database claims. One of them is wrong, so the episode cannot be trusted.",
   no_visible_change:
-    "Frame-to-final-frame similarity never dips (< 0.02). Nothing measurably happened in the scene.",
-  mostly_dead_time: "Less than 35% of the episode contains hand motion.",
+    "Every frame was compared against the episode's final frame. The similarity never dropped by more than 0.02, meaning nothing measurably happened.",
+  mostly_dead_time:
+    "Less than 35% of the episode falls between the first and last real hand movement.",
   too_short: "Fewer than 60 frames.",
   poor_image:
-    "Faint or low-detail frames, or unstable frame size — low_detail_frac, faint_frac, size_cv.",
-  jittery: "Rough hand and head motion — SPARC on all three tracks.",
-  unsteady_camera: "Head moves roughly or sits idle — head_jerk_rms, head_idle_frac.",
-  hesitant: "The hands spend a lot of the episode not moving — left and right idle_frac.",
+    "Faint or low-detail frames, or an unstable frame size — measured from compressed JPEG byte size.",
+  jittery: "Rough, unsmooth motion — SPARC smoothness on both hands and the head.",
+  unsteady_camera: "The head moves roughly, or sits still for long stretches.",
+  hesitant: "The hands spend an unusual share of the episode not moving.",
   incomplete:
-    "Activity does not span the episode, or the reach is indirect — act_span, straightness.",
+    "Movement does not span the episode, or the reach wanders instead of going straight to the target.",
   below_average:
-    "No axis crossed its flag threshold. This episode ranked below its operator's quota without an identifiable defect — a budget decision, not a claim about the data.",
+    "The outlier test rejected this episode, but it crossed no axis threshold — statistically unusual without an identifiable defect.",
 };
 
-/** Reasons combine as "hesitant+jittery", so an axis filter matches either half. */
+/** Plain-language note on where each dialog metric comes from. */
+export const METRIC_NOTES: Record<string, string> = {
+  score:
+    "Average of every quality feature that survived the confound check, re-centred on this operator's own median. 0 is typical for them.",
+  operator: "Which demonstrator recorded the episode. All scoring is relative to this person.",
+  frames: "Images actually present in the storage shard, counted from its index.",
+  catalog_frames: "Frames the database claims exist. A disagreement is a defect.",
+  act_span:
+    "Share of the episode between the first and last real hand movement, where 'real' means faster than 15% of this episode's own peak speed.",
+  progress_dip:
+    "How much the scene visibly changed, from comparing every frame's embedding to the final frame. Higher means more happened.",
+  trim_span: "Frame range worth keeping — first moving frame to last.",
+  cluster:
+    "Which behaviour group the episode's embedding landed in. Groups are found by k-means, not defined by hand.",
+  outlier_p:
+    "Probability of sitting this far from its own group's centre by chance. Small means suspicious.",
+};
+
+/** Plain-language note on how each failure axis is measured. */
+export const AXIS_NOTES: Record<string, string> = {
+  poor_image: "faintness and detail loss, from compressed JPEG size per frame",
+  jittery: "SPARC motion smoothness across left hand, right hand and head",
+  unsteady_camera: "head jerk, plus how long the head sat completely still",
+  hesitant: "share of the episode with both hands stationary",
+  incomplete: "whether movement spans the episode, and how directly the hand reaches",
+};
+
+export const AXIS_METHOD =
+  "Each axis averages its features after re-centring on this operator's median and dividing by their spread. Positive is worse than that operator's typical; past 1.0 it is flagged.";
+
+/** Reasons can combine as "hesitant+jittery", so an axis matches either half. */
 export function reasonMatches(reason: string | null, selection: string): boolean {
   if (!reason) return false;
   if ((QUALITY_AXES as readonly string[]).includes(selection)) {
@@ -95,6 +130,10 @@ export function reasonMatches(reason: string | null, selection: string): boolean
 
 export function parseFlags(flags: string | null): string[] {
   return flags ? flags.split("+").filter(Boolean) : [];
+}
+
+export function hasFlag(episode: Episode, axis: string): boolean {
+  return parseFlags(episode.flags).includes(axis);
 }
 
 export async function fetchEpisodes(): Promise<Episode[]> {
@@ -111,18 +150,20 @@ export function summarise(episodes: Episode[]) {
   const integrity = episodes.filter((e) =>
     (INTEGRITY_REASONS as readonly string[]).includes(e.reason ?? ""),
   ).length;
-  const belowAverage = episodes.filter((e) => e.reason === BELOW_AVERAGE).length;
-  const flaggedKeeps = episodes.filter(
-    (e) => e.decision === "keep" && parseFlags(e.flags).length > 0,
-  ).length;
+  const flagged = episodes.filter((e) => parseFlags(e.flags).length > 0).length;
+  // an episode only reaches the outlier test if it has an embedding; the rest were never examined
+  const tested = episodes.filter((e) => e.cluster !== null).length;
   return {
     total: episodes.length,
     kept,
     dropped,
     integrity,
-    belowAverage,
-    quality: dropped - integrity - belowAverage,
-    flaggedKeeps,
+    outlier: dropped - integrity,
+    flagged,
+    flaggedKeeps: episodes.filter((e) => e.decision === "keep" && parseFlags(e.flags).length > 0)
+      .length,
+    tested,
+    untested: episodes.length - tested,
     keepRate: episodes.length ? kept / episodes.length : 0,
   };
 }
@@ -135,13 +176,15 @@ export function countIntegrity(episodes: Episode[]) {
   })).sort((a, b) => b.count - a.count);
 }
 
-/** Counted by containment, so an episode named "hesitant+jittery" lands in both axes. */
-export function countAxes(episodes: Episode[]) {
-  const drops = episodes.filter((e) => e.decision === "drop");
+/**
+ * Warning flags across every episode, kept or dropped. Counted by containment, so an episode
+ * flagged "hesitant+jittery" lands in both axes.
+ */
+export function countFlags(episodes: Episode[]) {
   return QUALITY_AXES.map((axis) => ({
     reason: axis as string,
     label: REASON_LABELS[axis],
-    count: drops.filter((e) => reasonMatches(e.reason, axis)).length,
+    count: episodes.filter((e) => hasFlag(e, axis)).length,
   })).sort((a, b) => b.count - a.count);
 }
 
@@ -163,6 +206,7 @@ export function keepRateByOperator(episodes: Episode[]) {
 }
 
 export function scoreHistogram(episodes: Episode[], bins = 24) {
+  if (!episodes.length) return [];
   const scores = episodes.map((e) => e.score);
   const low = Math.min(...scores);
   const high = Math.max(...scores);

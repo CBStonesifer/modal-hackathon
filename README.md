@@ -176,21 +176,24 @@ outputs the dashboard and the writeup refer to.
 
 ## Known state
 
-Three things are inconsistent right now and are worth knowing before reading the dashboard.
+Current manifest: **5,337 keep / 70 drop**, every drop an integrity failure, plus **2,297
+episodes carrying a warning flag** without being rejected. The dashboard and the endpoint both
+reflect this.
 
-**The deployed manifest is a generation behind.** `keep_drop.csv` in this repo is 5,337 keep / 70
-drop, produced by the current quota-free `score.py`. The endpoint still serves 3,732 / 1,675 from
-the previous quota-based model. `modal run clips.py::build_manifest` resyncs them.
+**Tier 3 has only run on 350 of 5,407 episodes.** The outlier test therefore examined 318 and
+found nothing at α=0.01, and `progress_dip` is null for the remaining 94%. This is the one number
+that matters for reading the dashboard honestly: 5,089 episodes are marked keep because nothing
+rejected them, not because anything cleared them. The Overview states this in a coverage banner,
+the Clips tab has a **Never outlier-tested** filter, and per-episode `cluster` / `outlier_p` read
+"not tested" rather than showing a blank. Running `curate.py::embed` across the whole slice is
+what closes it.
 
-**The dashboard's copy describes the retired model.** Strings in
-`dashboard/src/lib/curation.ts` and `overview.tsx` still refer to "the operator's quota", which no
-longer exists — the per-operator quota was replaced by the embedding outlier test.
-
-**Tier 3 has only run on ~350 of 5,407 episodes.** So the outlier test examined 318 episodes,
-found nothing at α=0.01, and every drop in the current manifest is an integrity failure.
-`progress_dip` is null for the remaining 94%. `score.py` degrades silently when the embedding file
-is absent, which is how a full run and a tier-1-only run produce indistinguishable-looking output.
+Two smaller things `score.py` still does that are worth knowing: the per-axis reference
+distributions are computed over the whole population, including episodes the integrity rules
+already rejected, and trim spans come from the right hand alone, so a left-lead demonstration can
+get its opening clipped.
 
 Longer design notes are in `video-curation/docs/` — `PIPELINE.md` for what was run and measured,
-`RESULTS.md` for what the numbers mean, `CONCEPTS.md` for the metric definitions. Note that these
-predate the quota removal and still describe per-operator quotas throughout.
+`RESULTS.md` for what the numbers mean, `CONCEPTS.md` for the metric definitions. **These predate
+the quota removal and still describe per-operator quotas throughout**; the code and this README are
+current, the docs are not.
