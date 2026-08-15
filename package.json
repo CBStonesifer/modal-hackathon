@@ -4,8 +4,8 @@
   "type": "module",
   "scripts": {
     "dev": "cd dashboard && bun run dev",
-    "build": "cd dashboard && bun install && bun run build",
-    "build:dev": "cd dashboard && bun install && bun run build:dev",
+    "build": "cd dashboard && bun install && bun run build && cd .. && rm -rf dist && cp -r dashboard/dist dist",
+    "build:dev": "cd dashboard && bun install && bun run build:dev && cd .. && rm -rf dist && cp -r dashboard/dist dist",
     "preview": "cd dashboard && bun run preview",
     "lint": "cd dashboard && bun run lint"
   }
