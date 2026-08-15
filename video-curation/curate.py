@@ -353,8 +353,12 @@ MODELS = {
     "dinov2-base":  "facebook/dinov2-base",       # 86M,  768d — the baseline
     "dinov2-large": "facebook/dinov2-large",      # 300M, 1024d
     "siglip2":      "google/siglip2-base-patch16-256",   # 375M, 768d, text-aligned
+    # patch32 sees 64 tokens per image instead of 256, so attention is ~16x cheaper for the
+    # same training recipe and the same 768d output — the cheapest way to keep SigLIP2's
+    # within-episode progress signal without paying patch16's compute
+    "siglip2-fast": "google/siglip2-base-patch32-256",
 }
-MODEL = MODELS["siglip2"]  # best within-episode progress signal; see PIPELINE.md 5b
+MODEL = MODELS["siglip2-fast"]  # see PIPELINE.md 5b for why the family is SigLIP2
 FRAMES_PER_EPISODE = 32
 
 
@@ -508,8 +512,11 @@ def fetch_frames(client, bucket: str, prefix: str, camera: str, wanted: list[int
     max_containers=30,
     timeout=900,
 )
+# each episode spends most of its time on 32 S3 range reads, not on the GPU, and the workspace
+# only grants 10 concurrent GPUs — so overlapping inputs inside a container is the real lever
+@modal.concurrent(max_inputs=6)
 class Embedder:
-    encoder: str = modal.parameter(default="siglip2")
+    encoder: str = modal.parameter(default="siglip2-fast")
 
     @modal.enter()
     def load(self):
@@ -533,7 +540,11 @@ class Embedder:
         prefix = row["zarr_processed_path"].replace(f"s3://{bucket}/", "").rstrip("/")
         base = {"episode_hash": row["episode_hash"]}
 
+        import time
+
+        clock = time.perf_counter
         try:
+            started = clock()
             client = s3_client()
             n = int(row["n_frames"])
             lo = int(row.get("act_start", 0.0) * (n - 1))
@@ -558,13 +569,15 @@ class Embedder:
                         images[k] = images[k][y0:y1, x0:x1]
                         cropped += 1
 
+            fetched = clock()
             batch = self.processor(images=images, return_tensors="pt").to("cuda")
             with self.torch.no_grad():
                 out = self.model(pixel_values=batch["pixel_values"].half())
             emb = out.last_hidden_state[:, 0].float().cpu().numpy()  # CLS token
             emb = emb / np.linalg.norm(emb, axis=1, keepdims=True)
             return {**base, "ok": True, "error": "", "frame_idx": got,
-                    "cropped": cropped, "emb": emb.astype(np.float16)}
+                    "cropped": cropped, "emb": emb.astype(np.float16),
+                    "fetch_s": fetched - started, "gpu_s": clock() - fetched}
         except Exception as exc:
             return {**base, "ok": False, "error": f"{type(exc).__name__}: {exc}"}
 
@@ -572,7 +585,7 @@ class Embedder:
 @app.local_entrypoint()
 def embed(sample: int = 300, joined: str = "joined.parquet", out: str = "embeddings.npz",
           motion_weighted: bool = True, hand_crop: bool = False,
-          encoder: str = "siglip2"):
+          encoder: str = "siglip2-fast"):
     import numpy as np
     import pandas as pd
 
@@ -605,6 +618,11 @@ def embed(sample: int = 300, joined: str = "joined.parquet", out: str = "embeddi
     print(f"\n{len(good)} ok, {len(bad)} failed")
     for r in bad[:5]:
         print("  ", r if isinstance(r, Exception) else f"{r['episode_hash']}: {r['error']}")
+    if good:
+        fetch = np.median([r["fetch_s"] for r in good])
+        gpu = np.median([r["gpu_s"] for r in good])
+        print(f"per episode: {fetch:.2f}s fetching frames, {gpu:.2f}s on GPU "
+              f"({gpu / (fetch + gpu):.0%} of the work is the model)")
     if hand_crop:
         tot = sum(r.get("cropped", 0) for r in good)
         print(f"hand-cropped {tot}/{sum(len(r['frame_idx']) for r in good)} frames")
